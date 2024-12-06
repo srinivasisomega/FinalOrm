@@ -50,9 +50,9 @@ namespace GeneratedModels
         [PrimaryKey(IsIdentity = true)]
         public int Id { get; set; }
 
-        //[Column("UserId", IsNullable = false)]
-        //[ForeignKey("Users", "Id")]
-        //public int UserId { get; set; }
+        [Column("UserId", IsNullable = false)]
+        [ForeignKey("Users", "Id")]
+        public int UserId { get; set; }
 
         [Column("FirstName", IsNullable = false, Length = 50)]
         public string FirstName { get; set; }

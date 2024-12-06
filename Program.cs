@@ -1,5 +1,6 @@
 ﻿using FinalOrm.Attributes;
 using FinalOrm.ScriptGenerator;
+using GeneratedModels;
 using System.Reflection;
 
 //[Table("Users")]
@@ -45,6 +46,21 @@ class Program
     {
         string connectionString = "Server=COGNINE-L105;Database=bb2;Trusted_Connection=True;Trust Server Certificate=True;";
         DatabaseHelper.VerifyAndGenerateScripts(connectionString);
+        var userRepository = RepositoryFactory.Create<Users>();
+        var usersRepo = new Repository<Users>(connectionString);
+        var us = new Users { Username = "JohnDoe", PasswordHash = "hash1", CreatedAt = DateTime.Now };
+        var users = new List<Users>
+{
+    new Users { Username = "JohnDoe", PasswordHash = "hash1", CreatedAt = DateTime.Now },
+    new Users { Username = "JaneDoe", PasswordHash = "hash2", CreatedAt = DateTime.Now },
+};
+        usersRepo.Create(us);
+        usersRepo.Delete(2);
+        var xs = usersRepo.ReadAll();
+        foreach (var user in xs)
+        {
+            Console.WriteLine($"Id: {user.Id}, Username: {user.Username}, PasswordHash: {user.PasswordHash}, CreatedAt: {user.CreatedAt}");
+        }
         //var modelGenerator = new ModelGenerator();
 
 

@@ -81,7 +81,10 @@ namespace FinalOrm.ScriptGenerator
                     }
                 }
 
-                string alterScripts = TableScriptGenerator.GenerateAlterScripts(schemaDiscrepancies);
+                // Use Utility to handle constraint drops during alter script generation
+                var utility = new Utility(connectionString);
+                string alterScripts = TableScriptGenerator.GenerateAlterScripts(schemaDiscrepancies, utility);
+
                 if (string.IsNullOrWhiteSpace(alterScripts))
                 {
                     Console.WriteLine("No alter scripts generated.");
@@ -91,8 +94,7 @@ namespace FinalOrm.ScriptGenerator
                 Console.WriteLine("Generated Alter Scripts:");
                 Console.WriteLine(alterScripts);
 
-               
-
+                // Execute the alter scripts in the database
                 using (var connection = new SqlConnection(connectionString))
                 {
                     connection.Open();
@@ -110,13 +112,13 @@ namespace FinalOrm.ScriptGenerator
                         }
                     }
                 }
-
             }
             else
             {
                 Console.WriteLine("No schema discrepancies found.");
             }
         }
+
 
         private static List<string> CheckSchemaDiscrepancies(SqlConnection connection, Type modelType, string tableName)
         {

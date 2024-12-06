@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using FinalOrm.Attributes;
 using Microsoft.Data.SqlClient;
@@ -52,7 +53,7 @@ namespace FinalOrm.ScriptGenerator
             return scriptBuilder.ToString();
         }
 
-        public static string GenerateAlterScripts(Dictionary<Type, List<string>> schemaDiscrepancies)
+        public static string GenerateAlterScripts(Dictionary<Type, List<string>> schemaDiscrepancies, Utility utility)
         {
             var scriptBuilder = new StringBuilder();
 
@@ -86,62 +87,28 @@ namespace FinalOrm.ScriptGenerator
                     {
                         string columnName = discrepancy.Replace("Extra column with FK constraint:", "").Trim();
 
-                        // Drop FK constraint first
-                        scriptBuilder.AppendLine($@"
-        DECLARE @ConstraintName NVARCHAR(MAX);
-        SELECT @ConstraintName = CONSTRAINT_NAME
-        FROM INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE
-        WHERE TABLE_NAME = '{tableName}' AND COLUMN_NAME = '{columnName}';
+                        // Use utility to get constraint name and drop it dynamically
+                        string constraintName = utility.DropConstraintAndReturnName(tableName, columnName);
 
-        IF @ConstraintName IS NOT NULL
-        BEGIN
-            ALTER TABLE [{tableName}] DROP CONSTRAINT @ConstraintName;
-        END;");
+                        if (!string.IsNullOrEmpty(constraintName))
+                        {
+                            scriptBuilder.AppendLine($"ALTER TABLE [{tableName}] DROP CONSTRAINT [{constraintName}];");
+                        }
 
                         // Drop the column
                         scriptBuilder.AppendLine($"ALTER TABLE [{tableName}] DROP COLUMN [{columnName}];");
-                    }
-
-                    else if (discrepancy.Contains("mismatched data type"))
-                    {
-                        // Update column data type
-                        var parts = discrepancy.Split(':');
-                        string columnName = parts[0].Replace("Column", "").Trim();
-                        var property = modelType.GetProperties()
-                            .FirstOrDefault(p => p.GetCustomAttribute<ColumnAttribute>()?.Name == columnName || p.Name == columnName);
-
-                        if (property != null)
-                        {
-                            string newDataType = DatabaseHelper.GetSqlType(property.PropertyType);
-                            scriptBuilder.AppendLine($"ALTER TABLE [{tableName}] ALTER COLUMN [{columnName}] {newDataType};");
-                        }
                     }
                     else if (discrepancy.StartsWith("Drop column:"))
                     {
-                        // Drop column from the table
                         string columnName = discrepancy.Replace("Drop column:", "").Trim();
 
-                        // Check for foreign key constraints on this column
-                        scriptBuilder.AppendLine("DECLARE @ConstraintName NVARCHAR(MAX);");
-                        scriptBuilder.AppendLine("DECLARE @Sql NVARCHAR(MAX);");
-                        scriptBuilder.AppendLine();
-                        scriptBuilder.AppendLine("-- Retrieve the constraint name");
-                        scriptBuilder.AppendLine($"SELECT @ConstraintName = CONSTRAINT_NAME");
-                        scriptBuilder.AppendLine($"FROM INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE");
-                        scriptBuilder.AppendLine($"WHERE TABLE_NAME = '{tableName}' AND COLUMN_NAME = '{columnName}';");
-                        scriptBuilder.AppendLine();
-                        scriptBuilder.AppendLine("-- Drop the constraint if it exists");
-                        scriptBuilder.AppendLine("IF @ConstraintName IS NOT NULL");
-                        scriptBuilder.AppendLine("BEGIN");
-                        scriptBuilder.AppendLine("    -- Construct the SQL to drop the constraint");
-                        scriptBuilder.AppendLine($"    SET @Sql = 'ALTER TABLE [{tableName}] DROP CONSTRAINT [' + @ConstraintName + ']';");
-                        scriptBuilder.AppendLine();
-                        scriptBuilder.AppendLine("    -- Execute the SQL");
-                        scriptBuilder.AppendLine("    EXEC sp_executesql @Sql;");
-                        scriptBuilder.AppendLine("END;");
-                        scriptBuilder.AppendLine();
-                        scriptBuilder.AppendLine($"-- Drop the column");
+                        // Use utility to drop the constraint and append query
+                        string constraintName = utility.DropConstraintAndReturnName(tableName, columnName);
 
+                        if (!string.IsNullOrEmpty(constraintName))
+                        {
+                            scriptBuilder.AppendLine($"ALTER TABLE [{tableName}] DROP CONSTRAINT [{constraintName}];");
+                        }
 
                         // Drop the column
                         scriptBuilder.AppendLine($"ALTER TABLE [{tableName}] DROP COLUMN [{columnName}];");
@@ -150,6 +117,14 @@ namespace FinalOrm.ScriptGenerator
                     {
                         var parts = discrepancy.Split(':');
                         string columnName = parts[0].Replace("Column", "").Trim();
+
+                        // Use utility to drop constraint if necessary
+                        string constraintName = utility.DropConstraintAndReturnName(tableName, columnName);
+
+                        if (!string.IsNullOrEmpty(constraintName))
+                        {
+                            scriptBuilder.AppendLine($"ALTER TABLE [{tableName}] DROP CONSTRAINT [{constraintName}];");
+                        }
 
                         // Find the property that matches this column
                         var property = modelType.GetProperties()
@@ -157,21 +132,24 @@ namespace FinalOrm.ScriptGenerator
 
                         if (property != null)
                         {
-                            string newDataType = DatabaseHelper.GetSqlType(property.PropertyType);
+                            string newDataType = GetSqlType(property.PropertyType, property.GetCustomAttribute<ColumnAttribute>());
                             scriptBuilder.AppendLine($"ALTER TABLE [{tableName}] ALTER COLUMN [{columnName}] {newDataType};");
                         }
-                        else
+                    }
+                    else if (discrepancy.StartsWith("Missing FK constraint:"))
+                    {
+                        // Add missing foreign key constraint
+                        string details = discrepancy.Replace("Missing FK constraint:", "").Trim();
+                        var match = Regex.Match(details, @"Column \[(.+)\] references Table \[(.+)\] Column \[(.+)\]");
+                        if (match.Success)
                         {
-                            throw new InvalidOperationException($"No property found for column {columnName} in model {modelType.Name}");
+                            string columnName = match.Groups[1].Value;
+                            string referencedTable = match.Groups[2].Value;
+                            string referencedColumn = match.Groups[3].Value;
+
+                            scriptBuilder.AppendLine($"ALTER TABLE [{tableName}] ADD CONSTRAINT [FK_{tableName}_{columnName}] FOREIGN KEY ([{columnName}]) REFERENCES [{referencedTable}] ([{referencedColumn}]);");
                         }
                     }
-                    else if (discrepancy.StartsWith("Extra column:"))
-                    {
-                        string columnName = discrepancy.Replace("Extra column:", "").Trim();
-                        // Generate the script to drop the column
-                        scriptBuilder.AppendLine($"ALTER TABLE [{tableName}] DROP COLUMN [{columnName}];");
-                    }
-
 
                 }
             }
